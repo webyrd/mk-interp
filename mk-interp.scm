@@ -72,6 +72,7 @@
        (let ((var* (map car def*))
              (val* (map (lambda (x) (eval-exp (cadr x) env flag)) def*)))
          (eval-exp body (ext-env* var* val* env) flag)))
+;;; begin miniKanren-specific clauses
       ((run ,nexp (,x) . ,ge*) 
        (if flag (error 'eval-exp "Cannot re-enter run")
          (let ((n (eval-exp nexp env #t))
@@ -98,6 +99,7 @@
        (if (not flag) (error 'eval-exp "Not in run(*)")
          (lambda (s)
            ((disj (map (lambda (ge*) (eval-exp* ge* env flag)) ge*s)) s))))
+;;; end miniKanren-specific clauses      
       ((,rator . ,rand*) ((eval-exp rator env flag) (eval-exp* rand* env flag)))
       (else (error 'eval-exp "Invalid rator" rator)))))
 
@@ -105,6 +107,7 @@
   (lambda (exp* env flag)
     (map (lambda (e) (eval-exp e env flag)) exp*)))
 
+;;; Helpers for miniKanren.
 (define disj
   (lambda (g*s)
     (lambda (s)
@@ -137,7 +140,6 @@
       ((procedure? a-inf) (lambdaf@ () (mplus (f) a-inf)))
       (else (let ((a (car a-inf)) (f (lambdaf@ () (mplus (f) (cdr a-inf)))))
               (choice a f))))))
-;;; Helpers for miniKanren.
 
 (define var 
   (lambda (c)
@@ -205,7 +207,6 @@
                 (else (cons (car a-inf)
                         (take (and n (sub1 n)) (cdr a-inf))))))))))
 
-
 (define walk*
   (lambda (w s)
     (let ((v (walk w s)))
@@ -236,6 +237,8 @@
       (let ((v (walk* v s)))
         (walk* v (reify-s v '()))))))
 
+
+;;; tests
 (define-syntax test-check
   (syntax-rules ()
     ((_ title tested-expression expected-result)
