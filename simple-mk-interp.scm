@@ -22,7 +22,7 @@
     `((rec-env ,x* . ,a*) ,env)))
 
 (define apply-env
-  (lambda (env x flag)
+  (lambda (env x)
     (pmatch env
       (() (errorf 'apply-env "not in env ~s" x))
       (((env ,y* . ,a*) ,env^) (guard (memq x y*))
@@ -30,11 +30,11 @@
       (((rec-env ,y* . ,a*) ,env^) (guard (memq x y*))
        (let ((lam-exp (apply-rib y* a* x)))
          (pmatch lam-exp
-           ((internal-use-lambda ,x* ,body) (guard (for-all symbol? x*))
+           ((internal-use-lambda ,x* ,body-goal) (guard (for-all symbol? x*))
             (lambda (a*)
               (let ((env (ext-env* x* a* env)))
-                (eval-exp body env flag)))))))
-      (else (apply-env (cadr env) x flag)))))
+                (eval-goal-exp body-goal env)))))))
+      (else (apply-env (cadr env) x)))))
 
 (define apply-rib
   (lambda (y* a* x)
@@ -52,84 +52,86 @@
 
 (define value-of
   (lambda (prog)
-    (eval-prog prog '() #f)))
+    (eval-prog prog '())))
 
 (define eval-prog
-  (lambda (prog env flag)
+  (lambda (prog env)
     (pmatch prog
       ((begin . ,def*/body)
-       (begin-aux def*/body env flag))
+       (begin-aux def*/body env))
       ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
-       (eval-run-exp prog env flag))
+       (eval-run-exp prog env))
       (else (error 'eval-prog "Invalid prog" prog)))))
 
 (define eval-run-exp
-  (lambda (run-exp env flag)
+  (lambda (run-exp env)
     (pmatch run-exp
       ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
-       (if flag (error 'eval-run-exp "Cannot re-enter run")
-           (let ((n (eval-exp nexp env #t))
-                 (x-var (var x)))
-             (let ((env^ (ext-env* `(,x) `(,x-var) env)))
-               (let ((g (conj (eval-exp* ge* env^ #t))))
-                 (let ((a* (take n (lambdaf@ () (g '())))))
-                   (map (reify x-var) a*)))))))
-      (else (error 'eval-run-run "Invalid run-exp" run-exp)))))
+       (let ((n (eval-simple-exp nexp env))
+             (x-var (var x)))
+         (let ((env^ (ext-env* `(,x) `(,x-var) env)))
+           (let ((g (conj (eval-goal-exp* ge* env^))))
+             (let ((a* (take n (lambdaf@ () (g '())))))
+               (map (reify x-var) a*))))))
+      (else (error 'eval-run-exp "Invalid run-exp" run-exp)))))
 
-(define eval-exp
-  (lambda (exp env flag)
+(define eval-simple-exp
+  (lambda (exp env)
     (pmatch exp
       (,b (guard (boolean? b)) b)
-      (,x (guard (symbol? x)) (apply-env env x flag))
+      (,x (guard (symbol? x)) (apply-env env x))
       (,n (guard (number? n)) n)      
       ((quote ,val) val)
-      ((cons ,e1 ,e2) (cons (eval-exp e1 env flag) (eval-exp e2 env flag)))
-;;; begin miniKanren-specific clauses
+      ((cons ,e1 ,e2) (cons (eval-simple-exp e1 env) (eval-simple-exp e2 env)))
+      (else (error 'eval-simple-exp "Invalid exp" exp)))))
+
+(define eval-goal-exp
+  (lambda (goal-exp env)
+    (pmatch goal-exp
       ((== ,u ,v)
-       (if (not flag) (error 'eval-exp "Not in run(*)")
-         (lambda (s)
-           (lambdaf@ ()
-             (let ((u (eval-exp u env flag))
-                   (v (eval-exp v env flag)))
-               (cond
-                 ((unify u v s) => unit)
-                 (else (mzero))))))))
+       (lambda (s)
+         (lambdaf@ ()
+           (let ((u (eval-simple-exp u env))
+                 (v (eval-simple-exp v env)))
+             (cond
+               ((unify u v s) => unit)
+               (else (mzero)))))))
       ((conj . ,ge*)
-       (if (not flag) (error 'eval-exp "Not in run(*)")
-         (lambda (s)
-           ((conj (eval-exp* ge* env flag)) s))))
+       (lambda (s)
+         ((conj (eval-goal-exp* ge* env)) s)))
       ((disj . ,ge*)
-       (if (not flag) (error 'eval-exp "Not in run(*)")
-         (lambda (s)
-           ((disj (eval-exp* ge* env flag)) s))))
+       (lambda (s)
+         ((disj (eval-goal-exp* ge* env)) s)))
       ((fresh ,x* ,ge) (guard (for-all symbol? x*))
-       (if (not flag) (error 'eval-exp "Not in run(*)")
-         (let ((env^ (ext-env* x* (map var x*) env)))
-           (lambda (s)
-             ((conj (eval-exp* (list ge) env^ flag)) s)))))
-;;; end miniKanren-specific clauses      
+       (let ((env^ (ext-env* x* (map var x*) env)))
+         (lambda (s)
+           ((conj (eval-goal-exp* (list ge) env^)) s))))
       ((,rator . ,rand*) (guard (symbol? rator))
        ;; since we got rid of user-level 'lambda', rator must be a
        ;; symbol that evaluates to a goal
-       ((eval-exp rator env flag) (eval-exp* rand* env flag))) 
-      (else (error 'eval-exp "Invalid rator" rator)))))
+       ((eval-simple-exp rator env) (eval-simple-exp* rand* env)))
+      (else (error 'eval-goal-exp "Invalid goal-exp" goal-exp)))))
 
-(define eval-exp*
-  (lambda (exp* env flag)
-    (map (lambda (e) (eval-exp e env flag)) exp*)))
+(define eval-goal-exp*
+  (lambda (goal-exp* env)
+    (map (lambda (ge) (eval-goal-exp ge env)) goal-exp*)))
+
+(define eval-simple-exp*
+  (lambda (exp* env)
+    (map (lambda (e) (eval-simple-exp e env)) exp*)))
 
 (define begin-aux
-  (lambda (def*/body env flag)
+  (lambda (def*/body env)
     (letrec ((begin-aux
-              (lambda (def*/body name* fn* env flag)
+              (lambda (def*/body name* fn* env)
                 (pmatch def*/body
                   (((run ,nexp (,x) . ,ge*)) (guard (symbol? x))
                    (let ((env^ (ext-rec-env* (reverse name*) (reverse fn*) env)))
-                     (eval-run-exp (car def*/body) env^ flag)))
+                     (eval-run-exp (car def*/body) env^)))
                   (((define (,name . ,x*) ,e) . ,rest) (guard (for-all symbol? x*))
-                   (begin-aux rest (cons name name*) (cons `(internal-use-lambda ,x* ,e) fn*) env flag))
+                   (begin-aux rest (cons name name*) (cons `(internal-use-lambda ,x* ,e) fn*) env))
                   (else (error 'begin-aux "Invalid def*/run" def*/body))))))
-      (begin-aux def*/body '() '() env flag))))
+      (begin-aux def*/body '() '() env))))
 
 
 ;;; Helpers for miniKanren.
