@@ -59,18 +59,18 @@
     (pmatch prog
       ((begin . ,def*/body)
        (begin-aux def*/body env))
-      ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
+      ((run ,nexp (,x) ,ge) (guard (symbol? x))
        (eval-run-exp prog env))
       (else (error 'eval-prog "Invalid prog" prog)))))
 
 (define eval-run-exp
   (lambda (run-exp env)
     (pmatch run-exp
-      ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
+      ((run ,nexp (,x) ,ge) (guard (symbol? x))
        (let ((n (eval-simple-exp nexp env))
              (x-var (var x)))
          (let ((env^ (ext-env* `(,x) `(,x-var) env)))
-           (let ((g (conj (eval-goal-exp* ge* env^))))
+           (let ((g (eval-goal-exp ge env^)))
              (let ((a* (take n (lambdaf@ () (g '())))))
                (map (reify x-var) a*))))))
       (else (error 'eval-run-exp "Invalid run-exp" run-exp)))))
@@ -125,7 +125,7 @@
     (letrec ((begin-aux
               (lambda (def*/body name* fn* env)
                 (pmatch def*/body
-                  (((run ,nexp (,x) . ,ge*)) (guard (symbol? x))
+                  (((run ,nexp (,x) ,ge)) (guard (symbol? x))
                    (let ((env^ (ext-rec-env* (reverse name*) (reverse fn*) env)))
                      (eval-run-exp (car def*/body) env^)))
                   (((define (,name . ,x*) ,e) . ,rest) (guard (for-all symbol? x*))
@@ -445,21 +445,21 @@
                (disj
                  (== x 5)
                  (== x 6))))
-  '(6 5))
+  '(5 6))
 
 (test-check "run-g 2"
   (value-of '(run 2 (x)
                (disj
                  (conj (== x 5))
                  (conj (== x 6)))))
-  '(6 5))
+  '(5 6))
 
 (test-check "run*"
   (value-of '(run #f (x)
                (disj
                  (conj (== x 5))                 
                  (conj (== x 6)))))
-  '(6 5))
+  '(5 6))
 
 ;; (test-check "disj-true"
 ;;   (value-of '(run 1 (q) (disj (conj))))
@@ -476,7 +476,7 @@
                  (conj (disj
                          (conj (== q 6))                    
                          (conj (== q 4)))))))
-  '(3 6 4))
+  '(3 4 6))
 
 (test-check "disj 3 b"
   (value-of '(run 4 (q)
@@ -485,21 +485,21 @@
                  (disj
                    (== q 6)                    
                    (== q 4)))))
-  '(3 4 6))
+  '(3 6 4))
 
 (test-check "third"
   (value-of '(run 2 (q)
                (disj
                  (== 5 q)
                  (== 6 q))))
-  '(6 5))
+  '(5 6))
 
 (test-check "run* 2 ans"
   (value-of '(run #f (q)
                (disj
                  (== 5 q)
                  (== 6 q))))
-  '(6 5))
+  '(5 6))
 
 (test-check "four"
   (value-of '(run 3 (q)
@@ -508,7 +508,7 @@
                  (disj
                    (== q 6)
                    (== q 7)))))
-  '(5 7 6))
+  '(5 6 7))
 
 (test-check "five"
   (value-of '(run #f (q)
@@ -517,7 +517,7 @@
                  (disj
                    (== q 6)
                    (== q 7)))))
-  '(5 7 6))
+  '(5 6 7))
 
 (test-check "failure of one branch"
   (value-of '(run #f (q)
@@ -544,7 +544,7 @@
                (disj
                  (== q 3)
                  (== q 6))))
-  '(6 3))
+  '(3 6))
 
 (test-check "breaking conde"
   (value-of '(run #f (q)
@@ -556,7 +556,7 @@
                        (== a 5))
                      (== a q))
                    (== q 4)))))
-  '(4 5 6))
+  '(4 6 5))
 
 (test-check "conde/fresh working"
   (value-of '(run #f (q)
@@ -570,8 +570,8 @@
                    (== b 7)
                    (== (cons a (cons b '())) q)))))
   '((4 7)
-    (6 7)
-    (5 7)))
+    (5 7)
+    (6 7)))
 
 (test-check "multiple runs through conde"
   (value-of '(run 4 (q)
@@ -585,8 +585,8 @@
                        (== a 5)))                          
                    (== b 4)))))
   '((4 4)
-    (5 4)
-    (3 4)))
+    (3 4)
+    (5 4)))
 
 (test-check "nested conde, basic"
   (value-of '(run 4 (q)
@@ -596,7 +596,7 @@
                      (== a 3)                        
                      (== a 4))                       
                    (== a q)))))
-  '(4 3))
+  '(3 4))
 
 (test-check "nested conde"
   (value-of '(run 4 (q)
@@ -607,8 +607,8 @@
                      (== a 4))                        
                    (== b 7)                                            
                    (== (cons a (cons b '())) q)))))
-  '((4 7)
-    (3 7)))
+  '((3 7)
+    (4 7)))
 
 (test-check "12 answers"
   (value-of '(run #f (q)
@@ -637,7 +637,7 @@
                          (== a 2)
                          (== a 3))))
                    (== (cons a (cons b '())) q)))))
-  '((0 0) (1 0) (3 0) (2 0) (0 1) (0 2) (1 1) (1 2) (2 2) (3 1) (2 1) (3 2)))
+  '((0 0) (1 0) (3 0) (2 0) (0 1) (0 2) (1 1) (1 2) (3 1) (2 1) (3 2) (2 2)))
 
 (printf "******* FIXME -- commented test 'proper-listo'\n")
 #|
