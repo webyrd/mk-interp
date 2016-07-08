@@ -59,8 +59,22 @@
     (pmatch prog
       ((begin . ,def*/body)
        (begin-aux def*/body env flag))
-      (,exp
-       (eval-exp exp env flag)))))
+      ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
+       (eval-run-exp prog env flag))
+      (else (error 'eval-prog "Invalid prog" prog)))))
+
+(define eval-run-exp
+  (lambda (run-exp env flag)
+    (pmatch run-exp
+      ((run ,nexp (,x) . ,ge*) (guard (symbol? x))
+       (if flag (error 'eval-run-exp "Cannot re-enter run")
+           (let ((n (eval-exp nexp env #t))
+                 (x-var (var x)))
+             (let ((env^ (ext-env* `(,x) `(,x-var) env)))
+               (let ((g (conj (eval-exp* ge* env^ #t))))
+                 (let ((a* (take n (lambdaf@ () (g '())))))
+                   (map (reify x-var) a*)))))))
+      (else (error 'eval-run-run "Invalid run-exp" run-exp)))))
 
 (define eval-exp
   (lambda (exp env flag)
@@ -71,14 +85,6 @@
       ((quote ,val) val)
       ((cons ,e1 ,e2) (cons (eval-exp e1 env flag) (eval-exp e2 env flag)))
 ;;; begin miniKanren-specific clauses
-      ((run ,nexp (,x) . ,ge*)
-       (if flag (error 'eval-exp "Cannot re-enter run")
-         (let ((n (eval-exp nexp env #t))
-               (x-var (var x)))
-           (let ((env^ (ext-env* `(,x) `(,x-var) env)))
-             (let ((g (conj (eval-exp* ge* env^ #t))))
-               (let ((a* (take n (lambdaf@ () (g '())))))
-                 (map (reify x-var) a*)))))))
       ((== ,u ,v)
        (if (not flag) (error 'eval-exp "Not in run(*)")
          (lambda (s)
@@ -117,12 +123,12 @@
     (letrec ((begin-aux
               (lambda (def*/body name* fn* env flag)
                 (pmatch def*/body
-                  ((,body)
+                  (((run ,nexp (,x) . ,ge*)) (guard (symbol? x))
                    (let ((env^ (ext-rec-env* (reverse name*) (reverse fn*) env)))
-                     (eval-exp body env^ flag)))
+                     (eval-run-exp (car def*/body) env^ flag)))
                   (((define (,name . ,x*) ,e) . ,rest) (guard (for-all symbol? x*))
                    (begin-aux rest (cons name name*) (cons `(internal-use-lambda ,x* ,e) fn*) env flag))
-                  (else (error 'begin-aux "Invalid def*/body" def*/body))))))
+                  (else (error 'begin-aux "Invalid def*/run" def*/body))))))
       (begin-aux def*/body '() '() env flag))))
 
 
@@ -269,23 +275,6 @@
                "Failed: ~a~%Expected: ~a~%Computed: ~a~%"
                'tested-expression expected produced)))))))
 
-;; (test-check "non-composed run"
-;;   (value-of  '(run 1 (x) (== (run 1 (q) (== 5 q)) '(5))))
-;;   "Exception in eval-exp: Cannot re-enter run
-;;     Type (debug) to enter the debugger."
-
-(test-check "non-overlapping run"
-  (value-of  '(cons (run 1 (x) (== x 4)) (run 1 (x) (== x 5))))
-  '((4) . (5)))
-
-(test-check "gets 5"
-  (value-of '5)
-5)
-
-
-(test-check "list"
-  (value-of '(cons 1 (cons 3 (cons 4 '()))))
-  '(1 3 4))
 
 (test-check "run-g 0"
   (value-of '(run 1 (x) (== x 5)))
@@ -459,15 +448,15 @@
 (test-check "run-g 2"
   (value-of '(run 2 (x)
                (disj
-                 [conj (== x 5)]
-                 [conj (== x 6)])))
+                 (conj (== x 5))
+                 (conj (== x 6)))))
   '(6 5))
 
 (test-check "run*"
   (value-of '(run #f (x)
                (disj
-                 [conj (== x 5)]                 
-                 [conj (== x 6)])))
+                 (conj (== x 5))                 
+                 (conj (== x 6)))))
   '(6 5))
 
 ;; (test-check "disj-true"
@@ -624,27 +613,27 @@
                (fresh (a b)
                  (conj
                    (disj
-                     [conj
+                     (conj
                        (== b 0)
                        (disj
                          (== a 0)
                          (== a 1)
                          (== a 2)
-                         (== a 3))]
-                     [conj
+                         (== a 3)))
+                     (conj
                        (== b 1)
                        (disj
                          (== a 0)
                          (== a 1)
                          (== a 2)
-                         (== a 3))]
-                     [conj
+                         (== a 3)))
+                     (conj
                        (== b 2)
                        (disj
                          (== a 0)
                          (== a 1)
                          (== a 2)
-                         (== a 3))])
+                         (== a 3))))
                    (== (cons a (cons b '())) q)))))
   '((0 0) (1 0) (3 0) (2 0) (0 1) (0 2) (1 1) (1 2) (2 2) (3 1) (2 1) (3 2)))
 
@@ -652,13 +641,13 @@
 #|
 (test-check "proper-listo"
   (value-of '(run 7 (q)
-               (let ([f (lambda (f)
+               (let ((f (lambda (f)
                           (lambda (q)
                             (conde
                               ((== q '()))                              
                               ((fresh (a d)                                
                                  (== (cons a d) q)
-                                 ((f f) d))))))])
+                                 ((f f) d))))))))
                  ((f f) q))))
   '(()
     (_.0)
@@ -675,17 +664,17 @@
   (value-of '(run 10 (q)
                (fresh (a b c)
                  (== (cons a (cons b (cons c '()))) q)
-                 (let ([f (lambda (f)
+                 (let ((f (lambda (f)
                             (lambda (x)
                               (lambda (y)
                                 (lambda (z)
                                   (conde
                                     ((== '() x)
-                                     (== y z))                                        
+                                     (== y z))
                                     ((fresh (h i j)
                                        (== (cons h i) x)
                                        (== (cons h j) z)
-                                       ((((f f) i) y) j))))))))])
+                                       ((((f f) i) y) j))))))))))
                    ((((f f) a) b) c)))))
   '((() _.0 _.0)
     ((_.0) _.1 (_.0 . _.1))
