@@ -51,8 +51,16 @@
     ((_ () e) (lambda () e))))
 
 (define value-of
-  (lambda (exp)
-    (eval-exp exp '() #f)))
+  (lambda (prog)
+    (eval-prog prog '() #f)))
+
+(define eval-prog
+  (lambda (prog env flag)
+    (pmatch prog
+      ((begin . ,def*/body)
+       (begin-aux def*/body env flag))
+      (,exp
+       (eval-exp exp env flag)))))
 
 (define eval-exp
   (lambda (exp env flag)
@@ -62,8 +70,6 @@
       (,n (guard (number? n)) n)      
       ((quote ,val) val)
       ((cons ,e1 ,e2) (cons (eval-exp e1 env flag) (eval-exp e2 env flag)))
-      ((begin . ,def*/body)
-       (begin-aux def*/body env flag))
 ;;; begin miniKanren-specific clauses
       ((run ,nexp (,x) . ,ge*)
        (if flag (error 'eval-exp "Cannot re-enter run")
@@ -694,15 +700,15 @@
 |#
 
 (test-check "define proper listo"
-  (value-of '(run 7 (q)
-               (begin
-                 (define (proper-listo l)
-                   (disj
-                     (== l '())                                   
-                     (fresh (a d)
-                       (conj
-                         (== (cons a d) l)
-                         (proper-listo d)))))
+  (value-of '(begin
+               (define (proper-listo l)
+                 (disj
+                   (== l '())                                   
+                   (fresh (a d)
+                     (conj
+                       (== (cons a d) l)
+                       (proper-listo d)))))
+               (run 7 (q)
                  (proper-listo q))))
   '(()
     (_.0)
@@ -714,18 +720,18 @@
 
 
 (test-check "define uncurried appendo"
-  (value-of '(run 4 (q)
-               (begin
-                 (define (appendo l s o)
-                   (disj
-                     (fresh (a d)
-                       (conj
-                         (== (cons a d) l)
-                         (fresh (res)
-                           (conj
-                             (appendo d s res)
-                             (== (cons a res) o)))))
-                     (conj (== l '()) (== s o))))
+  (value-of '(begin
+               (define (appendo l s o)
+                 (disj
+                   (fresh (a d)
+                     (conj
+                       (== (cons a d) l)
+                       (fresh (res)
+                         (conj
+                           (appendo d s res)
+                           (== (cons a res) o)))))
+                   (conj (== l '()) (== s o))))
+               (run 4 (q)
                  (fresh (a b c)
                    (conj
                      (appendo a b c)                            
@@ -736,18 +742,18 @@
     ((_.0 _.1 _.2) _.3 (_.0 _.1 _.2 . _.3))))
 
 (test-check "define uncurried appendo the normal way"
-  (value-of '(run 4 (q)
-               (begin
-                 (define (appendo l s o)
-                   (disj
-                     (conj (== l '()) (== s o))
-                     (fresh (a d)
-                       (conj
-                         (== (cons a d) l)
-                         (fresh (res)
-                           (conj
-                             (appendo d s res)
-                             (== (cons a res) o)))))))
+  (value-of '(begin
+               (define (appendo l s o)
+                 (disj
+                   (conj (== l '()) (== s o))
+                   (fresh (a d)
+                     (conj
+                       (== (cons a d) l)
+                       (fresh (res)
+                         (conj
+                           (appendo d s res)
+                           (== (cons a res) o)))))))
+               (run 4 (q)
                  (fresh (a b c)
                    (conj
                      (appendo a b c)
